@@ -141,4 +141,43 @@ contract LendingPool is ILendingPool, IPositionProvider {
         require(address(riskManager) == address(0), "LendingPool: risk manager already set");
         riskManager = IRiskManager(_riskManager);
     }
+
+    function liquidate(address user, address debtAsset, address collateralAsset, uint256 debtAmount) external override {
+        require(user != address(0), "LendingPool: zero user");
+        require(debtAmount > 0, "LendingPool: zero debt amount");
+
+        require(reserveManager.isActive(debtAsset), "LendingPool: inactive debt reserve");
+
+        require(reserveManager.isActive(collateralAsset), "LendingPool: inactive collateral reserve");
+
+        require(address(riskManager) != address(0), "LendingPool: risk manager not set");
+
+        require(riskManager.canLiquidate(user), "LendingPool: position is healthy");
+
+        UserTypes.Position storage userPosition = positions[user][collateralAsset];
+
+        require(userPosition.supplied > 0, "LendingPool: no collateral");
+
+        uint256 userDebt = positions[user][debtAsset].borrowed;
+
+        require(userDebt > 0, "LendingPool: no debt");
+
+        uint256 actualDebt = debtAmount > userDebt ? userDebt : debtAmount;
+
+        uint256 liquidationBonus = reserveManager.getLiquidationBonus(collateralAsset);
+
+        uint256 collateralAmount = actualDebt + (actualDebt * liquidationBonus) / 10_000;
+
+        require(userPosition.supplied >= collateralAmount, "LendingPool: insufficient collateral");
+
+        IERC20(debtAsset).safeTransferFrom(msg.sender, address(this), actualDebt);
+
+        positions[user][debtAsset].borrowed -= actualDebt;
+        totalBorrowed[debtAsset] -= actualDebt;
+
+        userPosition.supplied -= collateralAmount;
+        totalSupplied[collateralAsset] -= collateralAmount;
+
+        IERC20(collateralAsset).safeTransfer(msg.sender, collateralAmount);
+    }
 }

@@ -10,6 +10,8 @@ interface ILendingPool {
 
     function repay(address asset, uint256 amount) external;
 
+    function liquidate(address user, address debtAsset, address collateralAsset, uint256 debtAmount) external;
+
     function getUserCollateral(address user, address asset) external view returns (uint256);
 
     function getUserDebt(address user, address asset) external view returns (uint256);
