@@ -53,40 +53,40 @@ contract RiskManager is IRiskManager {
             return false;
         }
 
-        if (!reserveManager.isActive(asset)) {
-            return false;
-        }
-
-        address[] memory assets = positionProvider.getSupportedAssets();
-
-        uint256 borrowingCapacity;
+        uint256 collateralValue;
         uint256 debtValue;
 
-        for (uint256 i = 0; i < assets.length; i++) {
-            address collateralAsset = assets[i];
+        (collateralValue, debtValue) = _getAccountValues(user);
 
-            uint256 collateral = positionProvider.getUserCollateral(user, collateralAsset);
+        uint256 assetValue = _getAssetValue(asset, amount);
 
-            uint256 debt = positionProvider.getUserDebt(user, collateralAsset);
+        uint256 collateralFactor = reserveManager.getCollateralFactor(asset);
 
-            if (collateral > 0) {
-                uint256 collateralValue = _getAssetValue(collateralAsset, collateral);
-                uint256 collateralFactor = reserveManager.getCollateralFactor(collateralAsset);
-                borrowingCapacity += (collateralValue * collateralFactor) / BPS;
-            }
+        uint256 adjustedCollateral = (collateralValue * collateralFactor) / BPS;
 
-            if (debt > 0) {
-                debtValue += _getAssetValue(collateralAsset, debt);
-            }
-        }
-        uint256 newBorrowValue = _getAssetValue(asset, amount);
-        return debtValue + newBorrowValue <= borrowingCapacity;
+        return adjustedCollateral >= debtValue + assetValue;
     }
 
     function canLiquidate(address user) external view returns (bool) {
         uint256 healthFactor = this.calculateHealthFactor(user);
 
         return healthFactor < WAD;
+    }
+
+    function calculateLiquidationCollateral(address debtAsset, address collateralAsset, uint256 debtAmount)
+        external
+        view
+        returns (uint256)
+    {
+        require(debtAmount > 0, "RiskManager: zero debt amount");
+
+        uint256 debtValue = _getAssetValue(debtAsset, debtAmount);
+
+        uint256 liquidationBonus = reserveManager.getLiquidationBonus(collateralAsset);
+
+        uint256 collateralValue = (debtValue * (BPS + liquidationBonus)) / BPS;
+
+        return _getAmountFromValue(collateralAsset, collateralValue);
     }
 
     function _getAccountValues(address user) internal view returns (uint256 collateralValue, uint256 debtValue) {
@@ -111,9 +111,13 @@ contract RiskManager is IRiskManager {
 
     function _getAssetValue(address asset, uint256 amount) internal view returns (uint256) {
         uint256 price = priceOracle.getPrice(asset);
+
         uint8 priceDecimals = priceOracle.getPriceDecimals(asset);
+
         uint8 tokenDecimals = reserveManager.getDecimals(asset);
+
         uint256 normalizedAmount;
+
         if (tokenDecimals < 18) {
             normalizedAmount = amount * 10 ** (18 - tokenDecimals);
         } else if (tokenDecimals > 18) {
@@ -128,6 +132,32 @@ contract RiskManager is IRiskManager {
             price /= 10 ** (priceDecimals - 18);
         }
 
-        return (normalizedAmount * price) / 1e18;
+        return (normalizedAmount * price) / WAD;
+    }
+
+    function _getAmountFromValue(address asset, uint256 value) internal view returns (uint256) {
+        uint256 price = priceOracle.getPrice(asset);
+
+        uint8 priceDecimals = priceOracle.getPriceDecimals(asset);
+
+        uint8 tokenDecimals = reserveManager.getDecimals(asset);
+
+        if (priceDecimals < 18) {
+            price *= 10 ** (18 - priceDecimals);
+        } else if (priceDecimals > 18) {
+            price /= 10 ** (priceDecimals - 18);
+        }
+
+        uint256 normalizedAmount = (value * WAD) / price;
+
+        if (tokenDecimals < 18) {
+            return normalizedAmount / 10 ** (18 - tokenDecimals);
+        }
+
+        if (tokenDecimals > 18) {
+            return normalizedAmount * 10 ** (tokenDecimals - 18);
+        }
+
+        return normalizedAmount;
     }
 }

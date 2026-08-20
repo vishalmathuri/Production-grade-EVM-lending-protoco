@@ -13,4 +13,9 @@ interface IRiskManager {
     function canBorrow(address user, address asset, uint256 amount) external view returns (bool);
 
     function canLiquidate(address user) external view returns (bool);
+
+    function calculateLiquidationCollateral(address debtAsset, address collateralAsset, uint256 debtAmount)
+        external
+        view
+        returns (uint256);
 }
